@@ -48,3 +48,7 @@ build:
 # Clean build artifacts
 clean:
     rm -f coverage.out coverage.html accessdump
+
+fix:
+    just lint-fix
+    just fmt
