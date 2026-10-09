@@ -140,6 +140,8 @@ var paramTypeNames = map[int16]string{
 	// Not in Jackcess; Memo parameters occur in the production frontends.
 	ColTypeMemo: "LongText",
 	ColTypeGUID: "Guid",
+	// Not in Jackcess either; Access calls a Decimal parameter Decimal.
+	ColTypeNumeric: "Decimal",
 }
 
 var joinTypeNames = map[int16]string{
@@ -483,21 +485,26 @@ func (qb queryBuilder) selectType() (string, error) {
 		return "", err
 	}
 
+	var parts []string
+
 	switch {
 	case row.Flag&qDistinct != 0:
-		return "DISTINCT", nil
+		parts = append(parts, "DISTINCT")
 	case row.Flag&qDistinctRow != 0:
-		return "DISTINCTROW", nil
-	case row.Flag&qTop != 0:
+		parts = append(parts, "DISTINCTROW")
+	}
+
+	// TOP combines with either, as in SELECT DISTINCT TOP 10.
+	if row.Flag&qTop != 0 {
 		top := "TOP " + str(row.Name1)
 		if row.Flag&qPercent != 0 {
 			top += " PERCENT"
 		}
 
-		return top, nil
+		parts = append(parts, top)
 	}
 
-	return "", nil
+	return strings.Join(parts, " "), nil
 }
 
 func (qb queryBuilder) remoteDB() (string, error) {
@@ -635,6 +642,13 @@ func (qb queryBuilder) crosstabSQL(sb *strings.Builder) error {
 
 	if len(transform) > 1 || len(pivot) != 1 {
 		return unsupported("crosstab with %d TRANSFORM and %d PIVOT rows", len(transform), len(pivot))
+	}
+
+	// Fixed column headings (PIVOT ... IN (...)) may sit in Name1 of the
+	// pivot row. Neither reference renders them and no sample shows their
+	// format, so refuse instead of silently dropping them.
+	if str(pivot[0].Name1) != "" {
+		return unsupported("crosstab with fixed column headings %q", *pivot[0].Name1)
 	}
 
 	if len(transform) == 1 && transform[0].Expression != nil {

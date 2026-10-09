@@ -246,6 +246,32 @@ func TestReconstructQuery(t *testing.T) {
 			wantConn: "ODBC;DSN=x;Trusted_Connection=Yes",
 		},
 		{
+			name:  "distinct top",
+			flags: flagsSelect,
+			rows: []QueryRow{
+				typeRow(1),
+				{Attribute: qAttrFlag, Flag: qDistinct | qTop, Name1: ptr("10")},
+				table("T"),
+				column("T.Kunde"),
+			},
+			wantType: QueryTypeSelect,
+			wantSQL:  "SELECT DISTINCT TOP 10 T.Kunde\nFROM T;",
+		},
+		{
+			name:  "decimal parameter",
+			flags: flagsSelect,
+			rows: []QueryRow{
+				typeRow(1),
+				{Attribute: qAttrParameter, Name1: ptr("Betrag"), Flag: ColTypeNumeric},
+				table("T"),
+				column("T.x"),
+				where("T.Betrag > [Betrag]"),
+			},
+			wantType:   QueryTypeSelect,
+			wantParams: []string{"Betrag Decimal"},
+			wantSQL:    "PARAMETERS Betrag Decimal;\nSELECT T.x\nFROM T\nWHERE T.Betrag > [Betrag];",
+		},
+		{
 			name:  "memo parameter",
 			flags: flagsAppend,
 			rows: []QueryRow{
@@ -326,6 +352,16 @@ func TestReconstructQueryRefusesInsteadOfGuessing(t *testing.T) {
 		},
 		{name: "two WHERE rows", flags: flagsSelect, rows: []QueryRow{typeRow(1), table("T"), where("a"), where("b")}},
 		{name: "crosstab without PIVOT", flags: flagsCrosstab, rows: []QueryRow{typeRow(6), table("T"), column("Sum(x)")}},
+		{
+			name:  "crosstab with fixed column headings",
+			flags: flagsCrosstab,
+			rows: []QueryRow{
+				typeRow(6),
+				table("T"),
+				column("Sum(T.x)"),
+				{Attribute: qAttrColumn, Expression: ptr("T.Monat"), Flag: qCrosstabPivot, Name1: ptr(`"Jan","Feb"`)},
+			},
+		},
 		{name: "pass-through without SQL", flags: flagsPassThru, rows: []QueryRow{typeRow(8)}},
 		{
 			name:  "unreadable expression",
