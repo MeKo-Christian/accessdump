@@ -13,6 +13,8 @@ type Schema struct {
 	Relationships []Relationship
 	Queries       []QueryDef
 	Forms         []FormMeta
+	// Warnings lists non-fatal problems that affect the whole schema.
+	Warnings []string
 }
 
 // TableSchema describes one user table.
@@ -92,6 +94,11 @@ func (db *Database) ReadSchema() (*Schema, error) {
 	}
 
 	s := &Schema{}
+
+	cpErr := db.CodePageErr()
+	if cpErr != nil {
+		s.Warnings = append(s.Warnings, cpErr.Error())
+	}
 
 	for _, e := range entries {
 		if e.Type != ObjTypeLocalTable || strings.HasPrefix(e.Name, "MSys") {
@@ -338,7 +345,7 @@ func (db *Database) queryExpression(row Row) (string, bool, error) {
 	}
 
 	if db.IsJet3() {
-		return decodeJet3Text(resolved), true, nil
+		return db.decodeJet3Text(resolved), true, nil
 	}
 
 	return decodeJet4Text(resolved), true, nil

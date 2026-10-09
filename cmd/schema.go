@@ -83,6 +83,10 @@ var schemaCmd = &cobra.Command{
 				continue
 			}
 
+			for _, warning := range schema.Warnings {
+				fmt.Fprintf(out, "%s %s: %s\n", colorize("33", "WARN"), filepath.Base(file), warning)
+			}
+
 			fmt.Fprintf(out, "%s %s -> tables=%d queries=%d relationships=%d\n",
 				colorize("32", "OK"), filepath.Base(file),
 				len(schema.Tables), len(schema.Queries), len(schema.Relationships))

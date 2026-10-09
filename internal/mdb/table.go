@@ -265,7 +265,7 @@ func (db *Database) readTableDefJet3(tdefPage int64) (*TableDef, error) {
 			return nil, fmt.Errorf("mdb: Jet3 TDEF at page %d: name %d extends past TDEF", tdefPage, i)
 		}
 
-		td.Columns[i].Name = decodeJet3Text(tdefData[nameOff : nameOff+nameLen])
+		td.Columns[i].Name = db.decodeJet3Text(tdefData[nameOff : nameOff+nameLen])
 		nameOff += nameLen
 	}
 
@@ -317,15 +317,6 @@ func decodeUCS2(b []byte) string {
 	}
 
 	return string(utf16.Decode(u16))
-}
-
-func decodeJet3Text(b []byte) string {
-	end := len(b)
-	for end > 0 && b[end-1] == 0 {
-		end--
-	}
-
-	return string(b[:end])
 }
 
 // ColTypeName returns a human-readable name for a column type byte.
