@@ -74,7 +74,7 @@ func TestQueryExpression(t *testing.T) {
 	t.Parallel()
 
 	jet3 := &Database{pageSize: PageSizeJet3}
-	jet3CP1250 := &Database{pageSize: PageSizeJet3, charset: codePageEncoding(1250)}
+	jet3CP1250 := jet3WithCodePage(1250)
 	jet4 := &Database{pageSize: PageSizeJet4}
 
 	tests := []struct {

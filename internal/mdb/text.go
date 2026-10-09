@@ -44,7 +44,8 @@ func decodeJet4Text(b []byte) string {
 // Jet 3 stores text one byte per character (two for the East Asian code
 // pages) in the code page recorded in the database header, not in UTF-8:
 // Windows-1252 stores "Größe" as 47 72 F6 DF 65. Trailing NUL padding is
-// dropped. A Database without a known code page decodes as Windows-1252.
+// dropped. For a code page without a decoder only ASCII survives; see
+// CodePageErr.
 func (db *Database) decodeJet3Text(b []byte) string {
 	end := len(b)
 	for end > 0 && b[end-1] == 0 {
@@ -52,6 +53,10 @@ func (db *Database) decodeJet3Text(b []byte) string {
 	}
 
 	b = b[:end]
+
+	if db != nil && db.unsupportedCodePage {
+		return decodeASCII(b)
+	}
 
 	charset := defaultJet3Charset
 	if db != nil && db.charset != nil {

@@ -78,6 +78,9 @@ type Database struct {
 	pageCount int64
 	// charset decodes Jet 3 text, which is stored in the database code page.
 	charset encoding.Encoding
+	// unsupportedCodePage is set when the header names a code page without
+	// a decoder; see CodePageErr.
+	unsupportedCodePage bool
 }
 
 // Open opens an MDB file and parses its header.
@@ -116,7 +119,9 @@ func Open(path string) (*Database, error) {
 	}
 
 	db.pageCount = fi.Size() / db.pageSize
-	db.charset = codePageEncoding(db.Header.CodePage)
+
+	charset, ok := codePageEncoding(db.Header.CodePage)
+	db.charset, db.unsupportedCodePage = charset, !ok
 
 	return db, nil
 }

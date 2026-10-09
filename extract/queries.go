@@ -100,6 +100,11 @@ func Queries(path string, log *slog.Logger) ([]Query, error) {
 	}
 	defer db.Close()
 
+	cpErr := db.CodePageErr()
+	if cpErr != nil {
+		log.Warn("query text may be incomplete", "file", path, "err", cpErr)
+	}
+
 	defs, err := db.ReadQueries()
 	if err != nil {
 		return nil, fmt.Errorf("read queries %q: %w", path, err)

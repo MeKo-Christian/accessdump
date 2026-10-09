@@ -44,6 +44,12 @@ var infoCmd = &cobra.Command{
 		}
 
 		fmt.Fprintf(out, "codepage: %d\n", db.Header.CodePage)
+
+		cpErr := db.CodePageErr()
+		if cpErr != nil {
+			fmt.Fprintf(out, "codepageWarning: %s\n", cpErr)
+		}
+
 		fmt.Fprintf(out, "pageCount: %d\n", db.PageCount())
 		fmt.Fprintf(out, "tableCount: %d\n", len(names))
 
