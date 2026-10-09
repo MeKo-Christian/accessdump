@@ -175,10 +175,10 @@ func ParseEmbeddedQueryName(name string) (QueryOwner, bool) {
 }
 
 // passwordPattern matches the value of PWD= or Password= in a connect string,
-// either in braces (ODBC quoting, may contain ";") or up to the next
-// separator. A connect string can also sit inside SQL, e.g. in
+// either in braces (ODBC quoting, may contain ";", a literal "}" is written
+// "}}") or up to the next separator. A connect string can also sit inside SQL, e.g. in
 // IN ” [ODBC;...;PWD=x], hence the quote and bracket terminators.
-var passwordPattern = regexp.MustCompile(`(?i)\b(PWD|PASSWORD)(\s*=\s*)(\{[^}]*\}|[^;'"\]\r\n]*)`)
+var passwordPattern = regexp.MustCompile(`(?i)\b(PWD|PASSWORD)(\s*=\s*)(\{(?:[^}]|\}\})*\}|[^;'"\]\r\n]*)`)
 
 // RedactPasswords replaces every PWD=/Password= value in s with ***.
 func RedactPasswords(s string) string {

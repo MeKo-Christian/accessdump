@@ -69,3 +69,43 @@ func TestBuildQueryDefsTableMissing(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryExpression(t *testing.T) {
+	t.Parallel()
+
+	jet3 := &Database{pageSize: PageSizeJet3}
+	jet4 := &Database{pageSize: PageSizeJet4}
+
+	tests := []struct {
+		name        string
+		db          *Database
+		raw         []byte
+		want        string
+		wantPresent bool
+		wantErr     bool
+	}{
+		// Short values are stored inline as they are: one byte per
+		// character in Jet 3, UCS-2 in Jet 4.
+		{name: "jet3 inline", db: jet3, raw: []byte("x=1"), want: "x=1", wantPresent: true},
+		{name: "jet4 inline", db: jet4, raw: []byte{'x', 0, '=', 0, '1', 0}, want: "x=1", wantPresent: true},
+		{name: "NULL", db: jet4},
+		// A reference to an LVAL page that does not exist is an error, not NULL.
+		{name: "unresolvable", db: jet4, raw: []byte{3, 0, 0, LvalSingle, 0, 5, 0, 0, 0, 0, 0, 0}, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			row := Row{}
+			if test.raw != nil {
+				row["Expression"] = test.raw
+			}
+
+			got, present, err := test.db.queryExpression(row)
+			if (err != nil) != test.wantErr || present != test.wantPresent || got != test.want {
+				t.Errorf("got %q, %v, %v; want %q, %v, error=%v", got, present, err, test.want, test.wantPresent, test.wantErr)
+			}
+		})
+	}
+}

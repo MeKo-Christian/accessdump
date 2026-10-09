@@ -296,37 +296,52 @@ func (db *Database) readQueryRows() (map[int32][]QueryRow, error) {
 	for _, row := range rows {
 		oid := intField(row, "ObjectId")
 
+		var expr *string
+
+		text, present, exprErr := db.queryExpression(row)
+		if present {
+			expr = &text
+		}
+
 		byObjID[oid] = append(byObjID[oid], QueryRow{
 			// Attribute is a Byte column and Flag an Int column, so the
 			// reader hands them over as uint8 and int16.
-			Attribute:  byteField(row, "Attribute"),
-			Expression: db.memoTextField(row, "Expression"),
-			Flag:       int16Field(row, "Flag"),
-			Extra:      intField(row, "LvExtra"),
-			Name1:      optionalStringField(row, "Name1"),
-			Name2:      optionalStringField(row, "Name2"),
+			Attribute:     byteField(row, "Attribute"),
+			Expression:    expr,
+			ExpressionErr: exprErr,
+			Flag:          int16Field(row, "Flag"),
+			Extra:         intField(row, "LvExtra"),
+			Name1:         optionalStringField(row, "Name1"),
+			Name2:         optionalStringField(row, "Name2"),
 		})
 	}
 
 	return byObjID, nil
 }
 
-// memoTextField resolves a MEMO column to text, or nil when it is NULL or
-// cannot be resolved.
-func (db *Database) memoTextField(row Row, key string) *string {
-	raw, _ := row[key].([]byte)
+// queryExpression resolves the Expression memo of an MSysQueries row to text.
+// present is false when the value is NULL or empty. An error means a value
+// exists but could not be read; it must not be mistaken for NULL.
+func (db *Database) queryExpression(row Row) (string, bool, error) {
+	raw, _ := row["Expression"].([]byte)
 	if len(raw) == 0 {
-		return nil
+		return "", false, nil
 	}
 
 	resolved, err := db.ResolveMemo(raw)
-	if err != nil || len(resolved) == 0 {
-		return nil
+	if err != nil {
+		return "", false, fmt.Errorf("mdb: resolve Expression: %w", err)
 	}
 
-	text := decodeJet4Text(resolved)
+	if len(resolved) == 0 {
+		return "", false, nil
+	}
 
-	return &text
+	if db.IsJet3() {
+		return decodeJet3Text(resolved), true, nil
+	}
+
+	return decodeJet4Text(resolved), true, nil
 }
 
 func byteField(row Row, key string) uint8 {

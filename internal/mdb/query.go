@@ -140,6 +140,8 @@ var paramTypeNames = map[int16]string{
 	// Not in Jackcess; Memo parameters occur in the production frontends.
 	ColTypeMemo: "LongText",
 	ColTypeGUID: "Guid",
+	// Not in Jackcess either; Access calls a Decimal parameter Decimal.
+	ColTypeNumeric: "Decimal",
 }
 
 var joinTypeNames = map[int16]string{
@@ -153,10 +155,13 @@ var joinTypeNames = map[int16]string{
 type QueryRow struct {
 	Attribute  uint8
 	Expression *string
-	Flag       int16
-	Extra      int32
-	Name1      *string
-	Name2      *string
+	// ExpressionErr is set when Expression holds a value that could not be
+	// read. The query is then refused rather than rebuilt without it.
+	ExpressionErr error
+	Flag          int16
+	Extra         int32
+	Name1         *string
+	Name2         *string
 }
 
 // ReconstructedQuery is the result of rebuilding one saved query.
@@ -212,6 +217,13 @@ func ReconstructQuery(objectFlags int32, rows []QueryRow) (ReconstructedQuery, e
 
 	if result.Type == QueryTypeUnknown {
 		return result, unsupported("unknown query type (object flags %#x)", objectFlags)
+	}
+
+	// A WHERE that cannot be read must not turn into a query without one.
+	for _, row := range rows {
+		if row.ExpressionErr != nil {
+			return result, unsupported("expression of an attribute %d row unreadable: %v", row.Attribute, row.ExpressionErr)
+		}
 	}
 
 	// The type row must agree with the type we settled on.
@@ -473,21 +485,26 @@ func (qb queryBuilder) selectType() (string, error) {
 		return "", err
 	}
 
+	var parts []string
+
 	switch {
 	case row.Flag&qDistinct != 0:
-		return "DISTINCT", nil
+		parts = append(parts, "DISTINCT")
 	case row.Flag&qDistinctRow != 0:
-		return "DISTINCTROW", nil
-	case row.Flag&qTop != 0:
+		parts = append(parts, "DISTINCTROW")
+	}
+
+	// TOP combines with either, as in SELECT DISTINCT TOP 10.
+	if row.Flag&qTop != 0 {
 		top := "TOP " + str(row.Name1)
 		if row.Flag&qPercent != 0 {
 			top += " PERCENT"
 		}
 
-		return top, nil
+		parts = append(parts, top)
 	}
 
-	return "", nil
+	return strings.Join(parts, " "), nil
 }
 
 func (qb queryBuilder) remoteDB() (string, error) {
@@ -625,6 +642,13 @@ func (qb queryBuilder) crosstabSQL(sb *strings.Builder) error {
 
 	if len(transform) > 1 || len(pivot) != 1 {
 		return unsupported("crosstab with %d TRANSFORM and %d PIVOT rows", len(transform), len(pivot))
+	}
+
+	// Fixed column headings (PIVOT ... IN (...)) may sit in Name1 of the
+	// pivot row. Neither reference renders them and no sample shows their
+	// format, so refuse instead of silently dropping them.
+	if str(pivot[0].Name1) != "" {
+		return unsupported("crosstab with fixed column headings %q", *pivot[0].Name1)
 	}
 
 	if len(transform) == 1 && transform[0].Expression != nil {
