@@ -153,10 +153,13 @@ var joinTypeNames = map[int16]string{
 type QueryRow struct {
 	Attribute  uint8
 	Expression *string
-	Flag       int16
-	Extra      int32
-	Name1      *string
-	Name2      *string
+	// ExpressionErr is set when Expression holds a value that could not be
+	// read. The query is then refused rather than rebuilt without it.
+	ExpressionErr error
+	Flag          int16
+	Extra         int32
+	Name1         *string
+	Name2         *string
 }
 
 // ReconstructedQuery is the result of rebuilding one saved query.
@@ -212,6 +215,13 @@ func ReconstructQuery(objectFlags int32, rows []QueryRow) (ReconstructedQuery, e
 
 	if result.Type == QueryTypeUnknown {
 		return result, unsupported("unknown query type (object flags %#x)", objectFlags)
+	}
+
+	// A WHERE that cannot be read must not turn into a query without one.
+	for _, row := range rows {
+		if row.ExpressionErr != nil {
+			return result, unsupported("expression of an attribute %d row unreadable: %v", row.Attribute, row.ExpressionErr)
+		}
 	}
 
 	// The type row must agree with the type we settled on.

@@ -327,6 +327,11 @@ func TestReconstructQueryRefusesInsteadOfGuessing(t *testing.T) {
 		{name: "two WHERE rows", flags: flagsSelect, rows: []QueryRow{typeRow(1), table("T"), where("a"), where("b")}},
 		{name: "crosstab without PIVOT", flags: flagsCrosstab, rows: []QueryRow{typeRow(6), table("T"), column("Sum(x)")}},
 		{name: "pass-through without SQL", flags: flagsPassThru, rows: []QueryRow{typeRow(8)}},
+		{
+			name:  "unreadable expression",
+			flags: flagsDelete,
+			rows:  []QueryRow{typeRow(5), table("T"), {Attribute: qAttrWhere, ExpressionErr: errors.New("broken LVAL chain")}},
+		},
 	}
 
 	for _, test := range tests {
