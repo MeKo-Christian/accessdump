@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.5.1]
+
+### Fixed
+- Jet 3 text (names, TEXT values, query expressions) is decoded with the
+  code page recorded in the database header instead of byte for byte, which
+  turned non-ASCII characters such as "Größe" into U+FFFD. The header is
+  de-obfuscated first, so `info` now reports the real code page.
+- A Jet 3 code page without a decoder is no longer silently read as
+  Windows-1252: only ASCII is decoded, and `info`, `schema` and
+  `extract.Queries` report a warning (`Database.CodePageErr`,
+  `ErrUnsupportedCodePage`).
+
 ## [v0.5.0]
 
 ### Added
