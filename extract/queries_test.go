@@ -52,6 +52,7 @@ func TestRedactPasswords(t *testing.T) {
 		},
 		{in: "ODBC;Password = s3cr3t", want: "ODBC;Password = ***"},
 		{in: "ODBC;pwd={a;b}c;UID=x", want: "ODBC;pwd=***c;UID=x"},
+		{in: "ODBC;PWD={a}}b};UID=x", want: "ODBC;PWD=***;UID=x"},
 		{
 			in:   "SELECT * INTO T IN '' [ODBC;DSN=x;PWD=geheim]\nFROM A;",
 			want: "SELECT * INTO T IN '' [ODBC;DSN=x;PWD=***]\nFROM A;",
