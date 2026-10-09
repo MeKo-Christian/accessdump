@@ -636,8 +636,7 @@ func encodeUTF16LE(s string) []byte {
 
 	b := make([]byte, len(u16)*2)
 	for i, v := range u16 {
-		b[i*2] = byte(v)
-		b[i*2+1] = byte(v >> 8)
+		binary.LittleEndian.PutUint16(b[i*2:], v)
 	}
 
 	return b

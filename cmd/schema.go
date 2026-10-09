@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MeKo-Christian/accessdump/extract"
 	"github.com/MeKo-Christian/accessdump/internal/mdb"
 	"github.com/spf13/cobra"
 )
@@ -215,18 +216,19 @@ func renderDDL(dbName string, s *mdb.Schema) string {
 
 		for _, q := range s.Queries {
 			if q.SQL == "" {
-				fmt.Fprintf(&b, "-- Query: %s (SQL not available: %s)\n\n", q.Name, q.SQLStatus)
+				fmt.Fprintf(&b, "-- Query: %s (SQL not available: %s)\n\n", q.Name, querySQLProblem(q))
 				continue
 			}
 
-			trimSQL := strings.TrimSpace(q.SQL)
-			if strings.HasPrefix(strings.ToUpper(trimSQL), "SELECT") {
+			trimSQL := strings.TrimSuffix(strings.TrimSpace(extract.RedactPasswords(q.SQL)), ";")
+			if q.Type == mdb.QueryTypeSelect && len(q.Parameters) == 0 {
 				fmt.Fprintf(&b, "CREATE VIEW %s AS\n%s;\n\n", quoteIdent(q.Name), trimSQL)
 			} else {
-				// Action queries (INSERT/UPDATE/DELETE) are not valid DDL;
-				// emit as SQL comments so the text is preserved but won't execute.
+				// Action, union, crosstab and parameter queries are not valid
+				// views; emit them as SQL comments so the text is preserved but
+				// won't execute.
 				commented := "-- " + strings.ReplaceAll(trimSQL, "\n", "\n-- ")
-				fmt.Fprintf(&b, "-- Action query: %s\n%s;\n\n", q.Name, commented)
+				fmt.Fprintf(&b, "-- %s query: %s\n%s;\n\n", q.Type, q.Name, commented)
 			}
 		}
 	}
@@ -344,12 +346,22 @@ func writeQueryMarkdown(b *strings.Builder, queries []mdb.QueryDef) {
 		fmt.Fprintf(b, "### %s\n\n", q.Name)
 
 		if q.SQL != "" {
-			fmt.Fprintf(b, "```sql\n%s\n```\n\n", strings.TrimSpace(q.SQL))
+			fmt.Fprintf(b, "```sql\n%s\n```\n\n", strings.TrimSpace(extract.RedactPasswords(q.SQL)))
 			continue
 		}
 
-		fmt.Fprintf(b, "*SQL not available (%s)*\n\n", q.SQLStatus)
+		fmt.Fprintf(b, "*SQL not available (%s)*\n\n", querySQLProblem(q))
 	}
+}
+
+// querySQLProblem says why a query has no SQL: the status, plus the reason
+// when there is one.
+func querySQLProblem(q mdb.QueryDef) string {
+	if q.Reason == "" {
+		return string(q.SQLStatus)
+	}
+
+	return string(q.SQLStatus) + ": " + q.Reason
 }
 
 // quoteIdent wraps an identifier in Access-style square brackets.

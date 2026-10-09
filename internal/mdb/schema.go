@@ -47,21 +47,31 @@ type Relationship struct {
 type SQLStatus string
 
 const (
-	// SQLStatusFound means the SQL text was successfully read from MSysQueries.
+	// SQLStatusFound means the SQL was reconstructed from MSysQueries.
 	SQLStatusFound SQLStatus = "found"
 	// SQLStatusTableMissing means MSysQueries could not be opened at all
 	// (e.g. the table does not exist or the layout is unsupported).
 	SQLStatusTableMissing SQLStatus = "table-missing"
-	// SQLStatusNotInTable means MSysQueries was opened but contained no
-	// Attribute=0 row matching this query name.
+	// SQLStatusNotInTable means MSysQueries was opened but holds no rows for
+	// this query.
 	SQLStatusNotInTable SQLStatus = "not-in-table"
+	// SQLStatusUnsupported means the rows were found but could not be turned
+	// into SQL; QueryDef.Reason says why. SQL is empty rather than partial.
+	SQLStatusUnsupported SQLStatus = "unsupported"
 )
 
 // QueryDef is a named saved query.
 type QueryDef struct {
-	Name      string
-	SQL       string
+	Name       string
+	Type       QueryType
+	SQL        string
+	Parameters []string
+	// Connect is the connect string of a pass-through query, unredacted.
+	Connect   string
+	Hidden    bool
 	SQLStatus SQLStatus
+	// Reason explains SQLStatusUnsupported.
+	Reason string
 }
 
 // MSysRelationships cascade flags.
@@ -82,25 +92,18 @@ func (db *Database) ReadSchema() (*Schema, error) {
 	}
 
 	s := &Schema{}
-	queryNames := make(map[string]struct{})
 
 	for _, e := range entries {
-		switch e.Type {
-		case ObjTypeLocalTable:
-			if strings.HasPrefix(e.Name, "MSys") {
-				continue
-			}
-
-			ts, tErr := db.readTableSchema(int64(e.ID), e.Name)
-			if tErr != nil {
-				continue
-			}
-
-			s.Tables = append(s.Tables, ts)
-
-		case ObjTypeQuery:
-			queryNames[e.Name] = struct{}{}
+		if e.Type != ObjTypeLocalTable || strings.HasPrefix(e.Name, "MSys") {
+			continue
 		}
+
+		ts, tErr := db.readTableSchema(int64(e.ID), e.Name)
+		if tErr != nil {
+			continue
+		}
+
+		s.Tables = append(s.Tables, ts)
 	}
 
 	sort.Slice(s.Tables, func(i, j int) bool {
@@ -108,7 +111,7 @@ func (db *Database) ReadSchema() (*Schema, error) {
 	})
 
 	s.Relationships = db.readRelationships()
-	s.Queries = db.readQueries(queryNames)
+	s.Queries = db.readQueries(entries)
 
 	// Form metadata is best-effort; ignore errors (MSysAccessStorage may be absent).
 	s.Forms, _ = ScanFormBlobs(db)
@@ -204,96 +207,69 @@ func (db *Database) readRelationships() []Relationship {
 	return rels
 }
 
-// readQueries fetches SQL text from MSysQueries for each known query name.
-//
-// MSysQueries layout:
-//   - Rows are keyed by ObjectId, which matches the ID column in MSysObjects (the catalog).
-//   - The SQL text is in the "Expression" column on the row with Attribute == 0.
-//   - Expression is a Memo/LVAL column: ReadRows returns raw reference bytes that must be
-//     resolved via ResolveMemo and then decoded as UCS-2.
-//   - Some query types (append, update, delete, crosstab) store their definition in
-//     structured Attribute=5/6/7 rows instead of a single SQL string; for those,
-//     Attribute=0 Expression is empty and SQLStatusNotInTable is returned.
-//
-// Each returned QueryDef carries a SQLStatus explaining why SQL is present or absent.
-func (db *Database) readQueries(names map[string]struct{}) []QueryDef {
-	td, err := db.FindTable("MSysQueries")
-	if err != nil {
-		return buildQueryDefs(names, nil, SQLStatusTableMissing)
-	}
-
-	rows, err := td.ReadRows()
-	if err != nil {
-		return buildQueryDefs(names, nil, SQLStatusTableMissing)
-	}
-
-	// Build ObjectId → catalog query name map from the catalog entries.
-	// MSysObjects stores the name; MSysQueries rows reference it via ObjectId = MSysObjects.ID.
+// ReadQueries returns every saved query, including the embedded ~sq_ queries
+// of forms, reports and controls, with its SQL rebuilt from MSysQueries.
+func (db *Database) ReadQueries() ([]QueryDef, error) {
 	entries, err := db.Catalog()
 	if err != nil {
-		return buildQueryDefs(names, nil, SQLStatusTableMissing)
+		return nil, fmt.Errorf("mdb: ReadQueries: catalog: %w", err)
 	}
 
-	nameByObjID := make(map[int32]string)
-
-	for _, e := range entries {
-		if e.Type != ObjTypeQuery {
-			continue
-		}
-
-		if _, wanted := names[e.Name]; wanted {
-			nameByObjID[int32(e.ID)] = e.Name
-		}
-	}
-
-	// Collect SQL from Attribute=0 rows, joined to catalog names via ObjectId.
-	sqlByName := make(map[string]string)
-
-	for _, row := range rows {
-		if intField(row, "Attribute") != 0 {
-			continue
-		}
-
-		oid, _ := row["ObjectId"].(int32)
-
-		name, ok := nameByObjID[oid]
-		if !ok {
-			continue
-		}
-
-		// Expression is a Memo/LVAL: raw bytes returned by ReadRows need ResolveMemo + UCS-2 decode.
-		exprRaw, _ := row["Expression"].([]byte)
-		if len(exprRaw) == 0 {
-			continue
-		}
-
-		var resolved []byte
-
-		resolved, err = db.ResolveMemo(exprRaw)
-		if err != nil || len(resolved) == 0 {
-			continue
-		}
-
-		sqlByName[name] = decodeUCS2(resolved)
-	}
-
-	return buildQueryDefs(names, sqlByName, SQLStatusNotInTable)
+	return db.readQueries(entries), nil
 }
 
-// buildQueryDefs assembles a sorted []QueryDef from a name set and a SQL map.
-// missingStatus is assigned to any query whose name is absent from sqlByName.
-func buildQueryDefs(names map[string]struct{}, sqlByName map[string]string, missingStatus SQLStatus) []QueryDef {
-	queries := make([]QueryDef, 0, len(names))
+// readQueries rebuilds the SQL of every saved query in the catalog from its
+// MSysQueries rows; see query.go for the row layout.
+//
+// MSysQueries rows reference the catalog via ObjectId = MSysObjects.ID. Each
+// returned QueryDef carries a SQLStatus explaining why SQL is present or absent.
+func (db *Database) readQueries(entries []CatalogEntry) []QueryDef {
+	rowsByObjID, tableErr := db.readQueryRows()
 
-	for name := range names {
-		sql := sqlByName[name]
-		status := missingStatus
+	return buildQueryDefs(entries, rowsByObjID, tableErr)
+}
 
-		if sql != "" {
-			status = SQLStatusFound
+// buildQueryDefs turns the query catalog entries and their MSysQueries rows
+// into sorted QueryDefs. A non-nil tableErr marks MSysQueries as unreadable.
+func buildQueryDefs(entries []CatalogEntry, rowsByObjID map[int32][]QueryRow, tableErr error) []QueryDef {
+	var queryEntries []CatalogEntry
+
+	for _, e := range entries {
+		if e.Type == ObjTypeQuery {
+			queryEntries = append(queryEntries, e)
+		}
+	}
+
+	queries := make([]QueryDef, 0, len(queryEntries))
+
+	for _, e := range queryEntries {
+		def := QueryDef{Name: e.Name, Hidden: e.Flags&objectFlagHidden != 0}
+
+		rows := rowsByObjID[e.ID]
+
+		switch {
+		case tableErr != nil:
+			def.SQLStatus = SQLStatusTableMissing
+			def.Type = queryTypeOf(e.Flags, nil)
+		case len(rows) == 0:
+			def.SQLStatus = SQLStatusNotInTable
+			def.Type = queryTypeOf(e.Flags, nil)
+		default:
+			rebuilt, err := ReconstructQuery(e.Flags, rows)
+			def.Type = rebuilt.Type
+
+			if err != nil {
+				def.SQLStatus = SQLStatusUnsupported
+				def.Reason = strings.TrimPrefix(err.Error(), errQueryUnsupported.Error()+": ")
+			} else {
+				def.SQLStatus = SQLStatusFound
+				def.SQL = rebuilt.SQL
+				def.Parameters = rebuilt.Parameters
+				def.Connect = rebuilt.Connect
+			}
 		}
 
-		queries = append(queries, QueryDef{Name: name, SQL: sql, SQLStatus: status})
+		queries = append(queries, def)
 	}
 
 	sort.Slice(queries, func(i, j int) bool {
@@ -301,6 +277,77 @@ func buildQueryDefs(names map[string]struct{}, sqlByName map[string]string, miss
 	})
 
 	return queries
+}
+
+// readQueryRows reads MSysQueries, grouped by ObjectId in table order.
+func (db *Database) readQueryRows() (map[int32][]QueryRow, error) {
+	td, err := db.FindTable("MSysQueries")
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := td.ReadRows()
+	if err != nil {
+		return nil, err
+	}
+
+	byObjID := make(map[int32][]QueryRow)
+
+	for _, row := range rows {
+		oid := intField(row, "ObjectId")
+
+		byObjID[oid] = append(byObjID[oid], QueryRow{
+			// Attribute is a Byte column and Flag an Int column, so the
+			// reader hands them over as uint8 and int16.
+			Attribute:  byteField(row, "Attribute"),
+			Expression: db.memoTextField(row, "Expression"),
+			Flag:       int16Field(row, "Flag"),
+			Extra:      intField(row, "LvExtra"),
+			Name1:      optionalStringField(row, "Name1"),
+			Name2:      optionalStringField(row, "Name2"),
+		})
+	}
+
+	return byObjID, nil
+}
+
+// memoTextField resolves a MEMO column to text, or nil when it is NULL or
+// cannot be resolved.
+func (db *Database) memoTextField(row Row, key string) *string {
+	raw, _ := row[key].([]byte)
+	if len(raw) == 0 {
+		return nil
+	}
+
+	resolved, err := db.ResolveMemo(raw)
+	if err != nil || len(resolved) == 0 {
+		return nil
+	}
+
+	text := decodeJet4Text(resolved)
+
+	return &text
+}
+
+func byteField(row Row, key string) uint8 {
+	v, _ := row[key].(uint8)
+
+	return v
+}
+
+func int16Field(row Row, key string) int16 {
+	v, _ := row[key].(int16)
+
+	return v
+}
+
+func optionalStringField(row Row, key string) *string {
+	v, ok := row[key].(string)
+	if !ok {
+		return nil
+	}
+
+	return &v
 }
 
 // stringField extracts a string value from a Row, returning "" if absent or wrong type.

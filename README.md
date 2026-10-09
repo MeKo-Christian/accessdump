@@ -99,7 +99,54 @@ The `.schema.sql` file contains:
 
 - `CREATE TABLE` with column names, SQL types, `NOT NULL`, and `AUTOINCREMENT`
 - `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` for every relationship, with `ON UPDATE`/`ON DELETE CASCADE` where applicable
-- `CREATE VIEW` for SELECT queries; action queries (INSERT/UPDATE/DELETE) are preserved as SQL comments
+- `CREATE VIEW` for SELECT queries without parameters; all other queries (action, union, crosstab, parameter queries) are preserved as SQL comments
+
+### Extract saved queries
+
+```sh
+# SQL of every saved query
+accessdump queries MyDatabase.mdb
+
+# Counts per query type, plus every query that could not be reconstructed
+accessdump queries --summary MyDatabase.mdb
+
+# Everything as JSON
+accessdump queries --json MyDatabase.mdb
+```
+
+Access does not store the SQL text of a saved query; it stores the query broken
+into rows of `MSysQueries` and rebuilds the SQL when it is shown. `accessdump`
+rebuilds it the same way, for select, make-table, append, update, delete,
+crosstab, union, pass-through and data-definition queries. The row layout and
+rebuilding rules follow [Jackcess](https://jackcess.sourceforge.io/)
+(Apache License 2.0); see `internal/mdb/query.go`.
+
+- Embedded queries are included: the `~sq_` record and row sources Access keeps
+  for SQL typed directly into a form (`~sq_f<Form>`), a report
+  (`~sq_r<Report>`) or a control (`~sq_c<Form>~sq_c<Control>`,
+  `~sq_d<Report>~sq_d<Control>`). Each comes with its owner.
+- Pass-through queries come with their connect string. `PWD=` and `Password=`
+  values are replaced by `***`, in the connect string and in the SQL.
+- A query that cannot be rebuilt is listed with status `unsupported` and the
+  reason, never with partial SQL.
+
+From Go:
+
+```go
+queries, err := extract.Queries("MyDatabase.mdb", nil)
+for _, q := range queries {
+    if q.SQLStatus != extract.SQLStatusFound {
+        fmt.Printf("%s: %s (%s)\n", q.Name, q.SQLStatus, q.Reason)
+        continue
+    }
+    fmt.Printf("-- %s (%s)\n%s\n", q.Name, q.Type, q.SQL)
+}
+```
+
+The SQL is semantically what Access shows in SQL view; brackets, parentheses
+and line breaks can differ. `testdata/queries/AccessdumpQueries.bas` builds a
+fixture with one query per type and exports Access's own SQL for comparison;
+see [Development](#development).
 
 ### List modules without extracting
 
@@ -190,6 +237,26 @@ go test ./cmd -run TestLoadSchema_legacyFixture
 # Run with verbose output on a test file
 go run . extract --verbose testdata/sample.mdb
 go run . schema testdata/sample.mdb
+```
+
+#### Comparing queries with Access
+
+`TestQueriesMatchAccess` compares the rebuilt SQL with what Access shows. It
+needs a database plus an export of `CurrentDb.QueryDefs(...).SQL`, made with
+the VBA module `testdata/queries/AccessdumpQueries.bas` on Windows:
+
+1. Create an empty Access 2002-2003 `.mdb`, import the module, run
+   `BuildFixture` in the Immediate window. It creates tables, one query per
+   query type, a form, a report and a combo box with SQL sources, and writes
+   `<database>.expected.txt`.
+2. Copy both files to `testdata/queries/fixture.mdb` and
+   `testdata/queries/fixture.mdb.expected.txt`.
+
+Without these files the test is skipped. To check a production database, run
+`ExportQuerySQL` in it instead, and point the test at it:
+
+```sh
+ACCESSDUMP_COMPARE_MDB=/path/to/Frontend.mdb go test ./extract -run TestQueriesMatchAccess -v
 ```
 
 Test fixtures live in `testdata/`. Set `VBA_FIXTURE_DIR` to point at a directory of real `.mdb` files for integration testing against production data.

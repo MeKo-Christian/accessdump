@@ -89,42 +89,19 @@ func (td *TableDef) ReadRows() ([]Row, error) {
 		numRows := int(binary.LittleEndian.Uint16(page[numRowsOff:]))
 
 		for rowIdx := range numRows {
-			rowOff := rowTableOff + rowIdx*2
-			if rowOff+2 > len(page) {
-				break
-			}
-
-			offVal := binary.LittleEndian.Uint16(page[rowOff:])
-
-			// Check delete/lookup flags.
-			if offVal&rowDeleteFlag != 0 {
+			rowData, offVal, ok := pageRow(page, rowTableOff, rowIdx)
+			if !ok || offVal&rowDeleteFlag != 0 {
 				continue
 			}
 
 			if offVal&rowLookupFlag != 0 {
-				// Overflow row pointer — skip for now.
-				continue
+				// The row grew too big for its page and was moved; only a
+				// pointer to it is left here.
+				rowData, err = td.db.followOverflowRow(rowData, numRowsOff, rowTableOff)
+				if err != nil {
+					continue
+				}
 			}
-
-			offset := int(offVal & rowOffsetMask)
-			if offset >= len(page) {
-				continue
-			}
-
-			// Determine row end: previous row's start offset, or page end for first row.
-			var rowEnd int
-			if rowIdx == 0 {
-				rowEnd = len(page)
-			} else {
-				prevOff := binary.LittleEndian.Uint16(page[rowOff-2:])
-				rowEnd = int(prevOff & rowOffsetMask)
-			}
-
-			if offset >= rowEnd || rowEnd > len(page) {
-				continue
-			}
-
-			rowData := page[offset:rowEnd]
 
 			row, err := td.parseRow(rowData, sortedCols)
 			if err != nil {
@@ -136,6 +113,76 @@ func (td *TableDef) ReadRows() ([]Row, error) {
 	}
 
 	return rows, nil
+}
+
+// pageRow returns the bytes of row rowIdx on a data page and its raw offset
+// entry, whose high bits carry the delete and lookup flags. Rows are stored
+// from the end of the page backwards: a row runs from its offset to the
+// previous row's offset, the first one to the end of the page.
+func pageRow(page []byte, rowTableOff, rowIdx int) ([]byte, uint16, bool) {
+	entry := rowTableOff + rowIdx*2
+	if entry+2 > len(page) {
+		return nil, 0, false
+	}
+
+	offVal := binary.LittleEndian.Uint16(page[entry:])
+	start := int(offVal & rowOffsetMask)
+
+	end := len(page)
+	if rowIdx > 0 {
+		end = int(binary.LittleEndian.Uint16(page[entry-2:]) & rowOffsetMask)
+	}
+
+	if start >= end || end > len(page) {
+		return nil, offVal, false
+	}
+
+	return page[start:end], offVal, true
+}
+
+// maxOverflowHops bounds how many row pointers followOverflowRow chases, so a
+// corrupt pointer cycle cannot hang the reader.
+const maxOverflowHops = 8
+
+// followOverflowRow resolves the 4-byte pointer an overflowed row leaves at
+// its original place: the row number in the low byte, the page number in the
+// upper three, as for LVAL pointers. The relocated row carries the delete flag
+// on its own page so a page scan skips it; it is reached only through here.
+func (db *Database) followOverflowRow(ptr []byte, numRowsOff, rowTableOff int) ([]byte, error) {
+	for range maxOverflowHops {
+		if len(ptr) < 4 {
+			return nil, fmt.Errorf("mdb: overflow pointer too short (%d bytes)", len(ptr))
+		}
+
+		rowIdx := int(ptr[0])
+		pageNum := int64(ptr[1]) | int64(ptr[2])<<8 | int64(ptr[3])<<16
+
+		page, err := db.ReadPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("mdb: overflow page %d: %w", pageNum, err)
+		}
+
+		if PageType(page) != PageTypeData {
+			return nil, fmt.Errorf("mdb: overflow page %d is not a data page", pageNum)
+		}
+
+		if rowIdx >= int(binary.LittleEndian.Uint16(page[numRowsOff:])) {
+			return nil, fmt.Errorf("mdb: overflow row %d beyond page %d", rowIdx, pageNum)
+		}
+
+		data, offVal, ok := pageRow(page, rowTableOff, rowIdx)
+		if !ok {
+			return nil, fmt.Errorf("mdb: overflow row %d on page %d out of bounds", rowIdx, pageNum)
+		}
+
+		if offVal&rowLookupFlag == 0 {
+			return data, nil
+		}
+
+		ptr = data
+	}
+
+	return nil, errors.New("mdb: overflow pointer chain too long")
 }
 
 // parseRow parses a single row from raw row bytes (Jet4 format).
@@ -490,7 +537,7 @@ func readVarColumn(data []byte, col *Column, varOffsets []int, numVarCols int) a
 
 	switch col.Type {
 	case ColTypeText:
-		return decodeUCS2(raw)
+		return decodeJet4Text(raw)
 	case ColTypeBool:
 		if len(raw) >= 1 {
 			return raw[0] != 0

@@ -83,7 +83,7 @@ func TestClassifyBlobStrings_expressionEvent(t *testing.T) {
 // TestClassifyBlobStrings_recordSource verifies that a SELECT statement is
 // classified as the RecordSource.
 func TestClassifyBlobStrings_recordSource(t *testing.T) {
-	sql := "SELECT * FROM Orders;"
+	sql := "SELECT OrderID, Total FROM Orders;"
 	strs := []string{"MyForm", sql}
 	meta := classifyBlobStrings("TestForm", strs)
 
@@ -144,10 +144,8 @@ func TestScanFormBlobs_startMDB(t *testing.T) {
 	mod, ok := byName["Module_Übersicht"]
 	if !ok {
 		t.Error("expected form 'Module_Übersicht' in results")
-	} else {
-		if !strings.HasPrefix(mod.RecordSource, "SELECT") {
-			t.Errorf("Module_Übersicht: expected SELECT RecordSource, got %q", mod.RecordSource)
-		}
+	} else if !strings.HasPrefix(mod.RecordSource, "SELECT") {
+		t.Errorf("Module_Übersicht: expected SELECT RecordSource, got %q", mod.RecordSource)
 	}
 
 	// Übersicht has =HandleButtonClick() expression events.

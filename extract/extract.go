@@ -81,6 +81,7 @@ func Extract(path string, log *slog.Logger) ([]Module, error) {
 	if scanErr == nil && len(scanned) > 0 {
 		log.Debug("vba: standard extraction failed; recovered modules via raw LVAL scan",
 			"err", extractErr, "count", len(scanned))
+
 		return toModules(scanned), nil
 	}
 
@@ -109,5 +110,6 @@ func toModules(in []vba.ExtractedModule) []Module {
 			Warnings: m.Warnings,
 		}
 	}
+
 	return out
 }

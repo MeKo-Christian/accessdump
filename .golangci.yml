@@ -14,8 +14,10 @@ linters:
     - err113 # sentinel errors too verbose for this codebase
     - exhaustive # don't require exhaustive switch on enums
     - exhaustruct # don't require all struct fields populated
+    - exhaustruct_v5 # exhaustruct renamed in golangci-lint 2.14
     - gochecknoglobals # singletons and config vars are fine
     - godox # allow TODO/FIXME comments
+    - gomodguard # use gomodguard_v2 instead
     - ireturn # allow returning interfaces
     - lll # long lines acceptable in binary parsing code
     - mnd # magic numbers acceptable in binary format parsing
