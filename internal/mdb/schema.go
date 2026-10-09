@@ -338,7 +338,7 @@ func (db *Database) queryExpression(row Row) (string, bool, error) {
 	}
 
 	if db.IsJet3() {
-		return decodeJet3Text(resolved), true, nil
+		return db.decodeJet3Text(resolved), true, nil
 	}
 
 	return decodeJet4Text(resolved), true, nil

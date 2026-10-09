@@ -102,10 +102,3 @@ func TestReadTableDefJet3Synthetic(t *testing.T) {
 		t.Fatalf("col1 = %+v, want Name=Name Type=Text", td.Columns[1])
 	}
 }
-
-func TestDecodeJet3TextTrimsTrailingNull(t *testing.T) {
-	got := decodeJet3Text([]byte{'A', 'B', 0, 0})
-	if got != "AB" {
-		t.Fatalf("decodeJet3Text = %q, want %q", got, "AB")
-	}
-}

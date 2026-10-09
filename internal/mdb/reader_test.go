@@ -1,6 +1,7 @@
 package mdb
 
 import (
+	"encoding/binary"
 	"os"
 	"testing"
 )
@@ -55,6 +56,43 @@ func TestOpenAndHeader(t *testing.T) {
 	// sample.mdb: 71 pages (290816 / 4096).
 	if db.PageCount() != 71 {
 		t.Errorf("PageCount = %d, want 71", db.PageCount())
+	}
+
+	// The code page is only readable once the header obfuscation is removed.
+	if db.Header.CodePage != 1250 {
+		t.Errorf("CodePage = %d, want 1250", db.Header.CodePage)
+	}
+}
+
+func TestOpenStartHeaderCodePage(t *testing.T) {
+	db := startDB(t)
+
+	if db.Header.CodePage != 1252 {
+		t.Errorf("CodePage = %d, want 1252", db.Header.CodePage)
+	}
+}
+
+func TestDecryptHeaderCodePage(t *testing.T) {
+	for _, jetVersion := range []uint32{JetVersion3, JetVersion4} {
+		page := make([]byte, MinPageSize)
+		binary.LittleEndian.PutUint16(page[offsetCodePage:], 1252)
+
+		// The obfuscation is a plain XOR keystream, so applying it twice
+		// restores the input; the first call produces what Access writes.
+		for range 2 {
+			err := decryptHeader(page, jetVersion)
+			if err != nil {
+				t.Fatalf("decryptHeader: %v", err)
+			}
+
+			if jetVersion == JetVersion3 && page[offsetHeaderCrypt+headerCryptJet3] != 0 {
+				t.Fatal("Jet 3 decryption touched bytes past the 126-byte region")
+			}
+		}
+
+		if got := binary.LittleEndian.Uint16(page[offsetCodePage:]); got != 1252 {
+			t.Errorf("jet version %d: CodePage = %d, want 1252", jetVersion, got)
+		}
 	}
 }
 

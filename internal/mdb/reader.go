@@ -2,11 +2,14 @@
 package mdb
 
 import (
+	"crypto/rc4" //nolint:gosec // RC4 only removes the fixed Jet header obfuscation, it protects nothing.
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+
+	"golang.org/x/text/encoding"
 )
 
 const (
@@ -39,9 +42,18 @@ const (
 	offsetCodePage   = 0x3C
 	offsetDBKey      = 0x3E
 	offsetSortOrder  = 0x6E
+
+	// The header from offsetHeaderCrypt onward is XORed with an RC4 keystream
+	// derived from a fixed key: 126 bytes in Jet 3, 128 bytes later on.
+	offsetHeaderCrypt = 0x18
+	headerCryptJet3   = 126
+	headerCryptJet4   = 128
 )
 
-var magicBytes = [4]byte{0x00, 0x01, 0x00, 0x00}
+var (
+	magicBytes     = [4]byte{0x00, 0x01, 0x00, 0x00}
+	headerCryptKey = []byte{0xC7, 0xDA, 0x39, 0x6B}
+)
 
 var (
 	ErrJet3TableLayoutUnsupported = errors.New("mdb: Jet 3.5 table layout parsing is not implemented")
@@ -64,6 +76,8 @@ type Database struct {
 	Header    Header
 	pageSize  int64
 	pageCount int64
+	// charset decodes Jet 3 text, which is stored in the database code page.
+	charset encoding.Encoding
 }
 
 // Open opens an MDB file and parses its header.
@@ -102,6 +116,7 @@ func Open(path string) (*Database, error) {
 	}
 
 	db.pageCount = fi.Size() / db.pageSize
+	db.charset = codePageEncoding(db.Header.CodePage)
 
 	return db, nil
 }
@@ -182,9 +197,34 @@ func (db *Database) parseHeader() error {
 	db.Header.DBName = string(page[offsetDBName:nameEnd])
 
 	db.Header.JetVersion = binary.LittleEndian.Uint32(page[offsetJetVersion:])
+
+	err = decryptHeader(page, db.Header.JetVersion)
+	if err != nil {
+		return err
+	}
+
 	db.Header.CodePage = binary.LittleEndian.Uint16(page[offsetCodePage:])
 	db.Header.DBKey = binary.LittleEndian.Uint32(page[offsetDBKey:])
 	db.Header.SortOrder = binary.LittleEndian.Uint32(page[offsetSortOrder:])
+
+	return nil
+}
+
+// decryptHeader removes the RC4 obfuscation from the header fields that
+// follow the Jet version, in place.
+func decryptHeader(page []byte, jetVersion uint32) error {
+	n := headerCryptJet4
+	if jetVersion == JetVersion3 {
+		n = headerCryptJet3
+	}
+
+	cipher, err := rc4.NewCipher(headerCryptKey) //nolint:gosec // see import
+	if err != nil {
+		return fmt.Errorf("mdb: header cipher: %w", err)
+	}
+
+	region := page[offsetHeaderCrypt : offsetHeaderCrypt+n]
+	cipher.XORKeyStream(region, region)
 
 	return nil
 }

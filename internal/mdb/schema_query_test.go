@@ -74,6 +74,7 @@ func TestQueryExpression(t *testing.T) {
 	t.Parallel()
 
 	jet3 := &Database{pageSize: PageSizeJet3}
+	jet3CP1250 := &Database{pageSize: PageSizeJet3, charset: codePageEncoding(1250)}
 	jet4 := &Database{pageSize: PageSizeJet4}
 
 	tests := []struct {
@@ -87,6 +88,9 @@ func TestQueryExpression(t *testing.T) {
 		// Short values are stored inline as they are: one byte per
 		// character in Jet 3, UCS-2 in Jet 4.
 		{name: "jet3 inline", db: jet3, raw: []byte("x=1"), want: "x=1", wantPresent: true},
+		// Jet 3 text is in the database code page, not UTF-8.
+		{name: "jet3 cp1252", db: jet3, raw: []byte("[Gr\xf6\xdfe]>1"), want: "[Größe]>1", wantPresent: true},
+		{name: "jet3 cp1250", db: jet3CP1250, raw: []byte("[\x8akoda]"), want: "[Škoda]", wantPresent: true},
 		{name: "jet4 inline", db: jet4, raw: []byte{'x', 0, '=', 0, '1', 0}, want: "x=1", wantPresent: true},
 		{name: "NULL", db: jet4},
 		// A reference to an LVAL page that does not exist is an error, not NULL.

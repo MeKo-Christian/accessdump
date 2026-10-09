@@ -350,7 +350,7 @@ func (td *TableDef) parseRowJet3(data []byte, sortedCols []*Column) (Row, error)
 			continue
 		}
 
-		row[col.Name] = readVarColumnJet3(data, col, varOffsets, rowVarCols)
+		row[col.Name] = readVarColumnJet3(td.db, data, col, varOffsets, rowVarCols)
 	}
 
 	return row, nil
@@ -400,7 +400,7 @@ func crackJet3VarOffsets(row []byte, rowVarCols, bitmaskLen int) ([]int, error) 
 	return offsets, nil
 }
 
-func readVarColumnJet3(data []byte, col *Column, varOffsets []int, rowVarCols int) any {
+func readVarColumnJet3(db *Database, data []byte, col *Column, varOffsets []int, rowVarCols int) any {
 	idx := int(col.OffsetVar)
 	if idx >= rowVarCols || idx+1 >= len(varOffsets) {
 		return nil
@@ -417,7 +417,7 @@ func readVarColumnJet3(data []byte, col *Column, varOffsets []int, rowVarCols in
 
 	switch col.Type {
 	case ColTypeText:
-		return decodeJet3Text(raw)
+		return db.decodeJet3Text(raw)
 	case ColTypeBool:
 		if len(raw) >= 1 {
 			return raw[0] != 0
