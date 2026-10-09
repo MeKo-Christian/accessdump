@@ -35,8 +35,12 @@ test-race:
 
 # Run tests with coverage
 test-coverage:
-    go test -v -coverprofile=coverage.out ./...
+    go test -v -covermode=set -coverprofile=coverage.out ./...
     go tool cover -html=coverage.out -o coverage.html
+
+# Write code-coverage-results.md (total and per package) from coverage.out
+coverage-report:
+    ./scripts/coverage-report.sh
 
 # Run all checks (formatting, linting, tests, tidiness)
 ci: check-formatted test lint check-tidy
@@ -47,7 +51,7 @@ build:
 
 # Clean build artifacts
 clean:
-    rm -f coverage.out coverage.html accessdump
+    rm -f coverage.out coverage.html code-coverage-results.md accessdump
 
 fix:
     just lint-fix

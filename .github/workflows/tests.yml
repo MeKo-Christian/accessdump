@@ -13,6 +13,9 @@ jobs:
   unit-tests:
     name: Unit Tests
     uses: ./.github/workflows/test-unit.yml
+    permissions:
+      contents: read
+      pull-requests: write
 
   lint:
     name: Lint
