@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v0.5.0]
+
+### Added
+- Saved queries: the SQL is rebuilt from `MSysQueries` for select, make-table,
+  append, update, delete, crosstab, union, pass-through (including bulk) and
+  data-definition queries, plus the embedded `~sq_` record and row sources of
+  forms, reports and controls. A query that cannot be rebuilt is reported as
+  `unsupported` with a reason instead of partial SQL.
+- `extract.Queries(path, logger)` library API, and the `accessdump queries
+  [--summary|--json]` command.
+- `PWD=`/`Password=` values are redacted in connect strings and in SQL,
+  including braced values with escaped `}}`.
+
+### Changed
+- `schema` uses the query type: only parameterless selects become
+  `CREATE VIEW`, everything else stays a comment.
+- Lint: `exhaustruct_v5` disabled (renamed in golangci-lint 2.14). Local
+  `just lint` now needs golangci-lint 2.14 or newer.
+
+### Fixed
+- Rows that Jet moved to another page (overflow rows) were skipped. This
+  affected every table: VBA extraction now finds modules it missed before,
+  and databases whose VBA project was unreadable no longer fall back to the
+  forensic scan, which could report leftover modules of deleted code.
+- Jet 4 text stored with Unicode compression (`FF FE`) is decoded instead of
+  being read as UCS-2, which garbled umlauts.
+- Jet 3 query expressions are decoded as Jet 3 text.
+
 ## [v0.4.0]
 
 ### Added
