@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  # For the coverage comment on the pull request.
+  pull-requests: write
 
 jobs:
   test:
@@ -24,7 +26,25 @@ jobs:
           go-version: ${{ matrix.go-version }}
 
       - name: Test
-        run: go test ./...
+        run: go test -covermode=set -coverprofile=coverage.out ./...
+
+      - name: Coverage report
+        if: matrix.go-version == '1.25.x'
+        run: |
+          ./scripts/coverage-report.sh
+          cat code-coverage-results.md >> "$GITHUB_STEP_SUMMARY"
+
+      # A pull request from a fork gets a read-only token, so it only gets the
+      # job summary above.
+      - name: Coverage PR comment
+        if: >-
+          matrix.go-version == '1.25.x' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          recreate: true
+          path: code-coverage-results.md
 
       - name: Jet3 Synthetic Regression
         if: matrix.go-version == '1.25.x'

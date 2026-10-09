@@ -19,6 +19,7 @@ Keep parsing logic in `internal/*` packages and keep `cmd/` focused on user-faci
 - `go test ./...`: run unit/integration tests.
 - `go test -race ./...`: run race detector.
 - `go test -coverprofile=coverage.out ./...`: generate coverage profile.
+- `just coverage-report`: write `code-coverage-results.md` (total and per package) from `coverage.out`; CI posts it on every PR.
 - `go run . extract --verbose testdata/sample.mdb`: run CLI against fixture.
 - `just fmt`: format codebase via `treefmt` (gofumpt, gci, prettier).
 - `just lint`: run `golangci-lint`.

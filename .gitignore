@@ -8,6 +8,7 @@ accessdump.exe
 # Coverage
 coverage.out
 coverage.html
+code-coverage-results.md
 
 # Testdata
 testdata/jet35/
